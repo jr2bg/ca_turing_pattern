@@ -97,6 +97,20 @@ pub struct Parameters {
     pub n_y: usize,
 }
 
+impl Default for Parameters {
+    fn default() -> Self {
+        Parameters {
+            d_a: 0.6,
+            d_b: 0.3,
+            f: 0.2,
+            k: 0.1,
+            r: 0.5,
+            n_x: 600,
+            n_y: 600,
+        }
+    }
+}
+
 /// Universe to be considered
 /// Area where the simulation will be run
 pub type Universe = Vec<Vec<CellState>>;
@@ -109,7 +123,7 @@ pub type ColoredMap = Vec<Vec<f32>>;
 /// Create a universe with given dimensions and n cells with
 /// A and B components
 pub fn initialize_universe(
-    commands: Commands,
+    mut commands: Commands,
     parameters: Res<Parameters>,
 ){
     let prob_components:f64 = 0.005;
@@ -138,7 +152,7 @@ pub fn initialize_universe(
                     SpriteBundle {
                         sprite: Sprite {
                             custom_size: Some(Vec2::splat(sprite_sz)),
-                            color: Color::NONE,
+                            color: Color::GRAY,
                             ..Default::default()
                         },
                         transform: Transform::from_xyz(
@@ -172,11 +186,11 @@ fn get_adjacent_cells_diffusion(
     diffused_cell.a -= angular_rate * d_a * diffused_cell.a;
     diffused_cell.b -= angular_rate * d_b * diffused_cell.b;
 
-    diffused_cell.a += angular_rate * d_a * universe[neighbour_position.row][neighbour_position.col].a;
-    diffused_cell.b += angular_rate * d_b * universe[neighbour_position.row][neighbour_position.col].b;
+    diffused_cell.a += angular_rate * d_a * universe[neighbour_position.y][neighbour_position.x ].a;
+    diffused_cell.b += angular_rate * d_b * universe[neighbour_position.y][neighbour_position.x ].b;
 }
 
-/// Diffusion function for each cell 
+/// Diffusion for a cell 
 /// Add the adjacent and diagonal values of substance receved due to diffusion
 /// from substance A and B from its neighbours, and also substract the substance
 /// given to its neighbours using `d_a` and `d_b`.
@@ -192,90 +206,90 @@ fn get_diffusion_in_cell(
 
     let mut diffused_cell = *cell;
 
-    if position.row as i32 - 1 >= 0 && position.col as i32 - 1 >= 0 {
+    if position.y as i32 - 1 >= 0 && position.x  as i32 - 1 >= 0 {
         get_adjacent_cells_diffusion(
             d_a,
             d_b,
             0.05,
             &mut diffused_cell,
-            Position {row: position.row - 1, col: position.col - 1},
+            Position {y: position.y - 1, x: position.x  - 1},
             universe
             );
     }
 
-    if position.row as i32 - 1 >= 0 {
+    if position.y as i32 - 1 >= 0 {
         get_adjacent_cells_diffusion(
             d_a,
             d_b,
             0.2,
             &mut diffused_cell,
-            Position {row: position.row - 1, col: position.col },
+            Position {y: position.y - 1, x: position.x  },
             universe
             );
     } 
 
-    if position.row as i32 - 1 >= 0 && position.col + 1 < dimensions.col {
+    if position.y as i32 - 1 >= 0 && position.x  + 1 < dimensions.x {
         get_adjacent_cells_diffusion(
             d_a,
             d_b,
             0.05,
             &mut diffused_cell,
-            Position {row: position.row - 1, col: position.col + 1},
+            Position {y: position.y - 1, x: position.x  + 1},
             universe
             );
     }
 
-    if position.col + 1 < dimensions.col {
+    if position.x  + 1 < dimensions.x {
         get_adjacent_cells_diffusion(
             d_a,
             d_b,
             0.2,
             &mut diffused_cell,
-            Position {row: position.row, col: position.col + 1},
+            Position {y: position.y , x: position.x  + 1},
             universe
             );
     }
 
-    if position.row + 1 < dimensions.row && position.col + 1 < dimensions.col {
+    if position.y + 1 < dimensions.y && position.x  + 1 < dimensions.x {
         get_adjacent_cells_diffusion(
             d_a,
             d_b,
             0.05,
             &mut diffused_cell,
-            Position {row: position.row + 1, col: position.col + 1},
+            Position {y: position.y + 1, x: position.x  + 1},
             universe
             );
     }
 
-    if position.row + 1 < dimensions.row {
+    if position.y + 1 < dimensions.y {
         get_adjacent_cells_diffusion(
             d_a,
             d_b,
             0.2,
             &mut diffused_cell,
-            Position {row: position.row + 1, col: position.col},
+            Position {y: position.y + 1, x: position.x },
             universe,
             );
     }
 
-    if position.row + 1 < dimensions.row && position.col as i32 - 1 >= 0 {
+    if position.y + 1 < dimensions.y && position.x  as i32 - 1 >= 0 {
         get_adjacent_cells_diffusion(
             d_a,
             d_b,
             0.05,
             &mut diffused_cell,
-            Position {row: position.row + 1, col: position.col - 1},
+            Position {y: position.y + 1, x: position.x  - 1},
             universe
             );
     }
 
-    if position.col as i32 - 1 >= 0 {
+    if position.x  as i32 - 1 >= 0 {
         get_adjacent_cells_diffusion(
             d_a,
             d_b,
             0.2,
             &mut diffused_cell,
-            Position {row: position.row, col: position.col - 1},
+            Position {y: position.y , x: position.x  - 1},
             universe
             );
     }
@@ -314,7 +328,7 @@ fn transition(
     evolved_cell.a -= reproduction_reaction;
     evolved_cell.b += reproduction_reaction;
     
-    colored_map[position.row][position.col] = color_cell(&evolved_cell);
+    colored_map[position.y][position.x] = color_cell(&evolved_cell);
 
     evolved_cell
 }
@@ -327,14 +341,14 @@ fn evolution_universe(
     dimensions: &Position, 
     universe: Universe,
     colored_map: &mut ColoredMap) -> Universe {
-    let mut evolved_universe: Universe = vec![vec![ CellState {a: 0.0, b: 0.0} ; dimensions.col]; dimensions.row];
+    let mut evolved_universe: Universe = vec![vec![ CellState {a: 0.0, b: 0.0} ; dimensions.x]; dimensions.y];
     
-    for r in 0..dimensions.row {
-        for c in 0..dimensions.col{
+    for r in 0..dimensions.y {
+        for c in 0..dimensions.x{
             evolved_universe[r][c] = transition(
                 parameters,
                 &universe[r][c],
-                &Position {row: r, col: c},
+                &Position {y: r, x: c},
                 dimensions,
                 &universe,
                 colored_map
