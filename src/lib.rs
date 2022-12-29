@@ -1,57 +1,79 @@
+use bevy::prelude::*;
 /// Work from https://biologicalmodeling.org/prologue/diffusion_automaton
 use rand::thread_rng;
+use rand::Rng;
 use rand::seq::SliceRandom;
 
-/// Cell
+/// CellState
 /// Pair of values representing the A and B concentrations 
 /// A, B in interval [0,1]
 #[derive(Debug, Clone, Copy)]
-pub struct Cell {
+pub struct CellState {
     pub a: f32,
     pub b: f32,
 }
 
-/// Position
-/// Pair of values indicating the row,col position of a cell
-pub struct Position {
-    pub row: usize,
-    pub col: usize,
+impl Default for CellState{
+    fn default() -> Self {
+        CellState { a: 0., b: 0. }
+    }
 }
 
-/// Universe to be considered
-/// Area where the simulation will be run
-pub type Universe = Vec<Vec<Cell>>;
+impl CellState {
+    fn new(a: f32, b: f32) -> Self {
+        CellState { a, b }
+    }
 
-/// Color map
-/// Area with colors for each cell
-pub type ColoredMap = Vec<Vec<f32>>;
+    fn change_state(&mut self, a: f32, b: f32) {
+        self.a = a;
+        self.b = b;
+    }
 
-/// Initialize universe
-/// Create a universe with given dimensions and some values for the 
-/// A and B components
-pub fn initialize_universe(dimensions: &Position) -> (Universe, ColoredMap) {
-    let n = 3;
+    fn color(&self) -> f32 {
+        if self.a + self.b <= 0. {
+            return 0.
+        }
+        self.b / (self.a + self.b)
+    }
+}
 
-    let mut universe: Universe = vec![vec![Cell {a: 0.0, b: 0.0}; dimensions.col]; dimensions.row];
-    let mut colored_map: ColoredMap = vec![vec![0.0; dimensions.col]; dimensions.row];
+/// States
+/// Stores the pair of current and previous state
+#[derive(Debug, Clone, Copy, Component)]
+pub struct States {
+    pub prev: CellState,
+    pub curr: CellState,
+}
 
-    let mut positions: Vec<Position> = Vec::with_capacity(dimensions.row * dimensions.col);
-    for r in 0..dimensions.row {
-        for c in 0..dimensions.col {
-            positions.push(Position{row: r, col: c});
+impl States {
+    fn initialize(a: f32, b: f32) -> Self {
+        States {
+            prev: CellState::default(),
+            curr: CellState::new(a, b)
         }
     }
-    
-    positions.shuffle(&mut thread_rng());
-    let mut cell: &mut Cell;
-    for i in 0..n {
-        cell = &mut universe[positions[i].row][positions[i].col];
-        *cell = Cell {a: 1.0, b: 1.0};
-        colored_map[positions[i].row][positions[i].col] = color_cell(cell);
+
+    fn shift(&mut self) {
+        self.prev = self.curr;
     }
 
-    return (universe, colored_map);
+    fn get_sprite_color(&self) -> f32 {
+        self.curr.color()
+    }
+}
 
+/// Position
+/// Pair of values indicating the row,col position of a cell
+#[derive(Component)]
+pub struct Position {
+    pub x: usize,
+    pub y: usize,
+}
+
+impl Position {
+    fn new (x: usize, y: usize) -> Self {
+        Position {x, y}
+    }
 }
 
 /// Parameters for the simulation
@@ -61,25 +83,88 @@ pub fn initialize_universe(dimensions: &Position) -> (Universe, ColoredMap) {
 /// `d_b` -> diffusion rate for element B in interval [0,1]
 /// `f` -> constant feed rate for element A in interval [0,1]
 /// `k` -> constant death reaction rate for element B in interval [0,1]
-/// `r` -> constant reproduction reaction rate
+/// `r` -> constant reproduction reaction rate in interval [0,1]
+/// `n_rows` -> number of rows in the simulation
+/// `n_cols`-> number of columns in the simulation
+#[derive(Resource)]
 pub struct Parameters {
     pub d_a: f32,
     pub d_b: f32,
     pub f: f32,
     pub k: f32,
     pub r: f32,
+    pub n_x: usize,
+    pub n_y: usize,
+}
+
+/// Universe to be considered
+/// Area where the simulation will be run
+pub type Universe = Vec<Vec<CellState>>;
+
+/// Color map
+/// Area with colors for each cell
+pub type ColoredMap = Vec<Vec<f32>>;
+
+/// Initialize universe
+/// Create a universe with given dimensions and n cells with
+/// A and B components
+pub fn initialize_universe(
+    commands: Commands,
+    parameters: Res<Parameters>,
+){
+    let prob_components:f64 = 0.005;
+
+    let sprite_sz:f32 = 1.;
+    let (n_x, n_y) = (parameters.n_x, parameters.n_y);
+    let mut rng = rand::thread_rng();
+
+    commands.spawn(Camera2dBundle::default());
+    commands.spawn(SpatialBundle::from_transform(
+        Transform::from_xyz(
+            -(n_x as f32) * sprite_sz / 2., 
+            -(n_y as f32) * sprite_sz / 2., 
+            0.)
+        ))
+        .with_children(|builder| {
+            for x in 0..n_x {
+                for y in 0..n_y {
+                    let (a, b) = if rng.gen_bool(prob_components)  {
+                        (1.0_f32, 1.0_f32)
+                    } else {
+                        (0.0_f32, 0.0_f32)
+                    };
+                    builder.spawn((
+                        // All elements in tuple must derive from Component
+                    SpriteBundle {
+                        sprite: Sprite {
+                            custom_size: Some(Vec2::splat(sprite_sz)),
+                            color: Color::NONE,
+                            ..Default::default()
+                        },
+                        transform: Transform::from_xyz(
+                            sprite_sz * x as f32 ,
+                            sprite_sz * y as f32,
+                            0.0),
+                        ..Default::default()
+                    },
+                    Position::new(x, y),
+                    States::initialize(a, b),
+                    ));
+                }
+            }
+        });
 }
 
 /// Diffusion between two adjacent cells
 /// Substract from the diffused cell the quantity of components A and B proportional to
 /// its angular relation, i.e. if it is diagonal 0.05 and 0.2 in cc
-/// Similar, add the corresponding quantities of A and B from the Cell at 
+/// Similar, add the corresponding quantities of A and B from the CellState at 
 /// neighbour_position in  universe
 fn get_adjacent_cells_diffusion(
     d_a: f32,
     d_b: f32,
     angular_rate: f32,
-    diffused_cell: &mut Cell, 
+    diffused_cell: &mut CellState, 
     neighbour_position: Position,
     universe: &Universe
     ){
@@ -100,10 +185,10 @@ fn get_adjacent_cells_diffusion(
 fn get_diffusion_in_cell(
     d_a: f32,
     d_b: f32,
-    cell: &Cell, 
+    cell: &CellState, 
     position: &Position,
     dimensions: &Position,
-    universe: &Universe) -> Cell {
+    universe: &Universe) -> CellState {
 
     let mut diffused_cell = *cell;
 
@@ -205,13 +290,13 @@ fn get_diffusion_in_cell(
 /// the reproduction A + 2B -> 3B
 fn transition(
     parameters: &Parameters,
-    cell: &Cell, 
+    cell: &CellState, 
     position: &Position,
     dimensions: &Position,
     universe: &Universe,
-    colored_map: &mut ColoredMap) -> Cell {
+    colored_map: &mut ColoredMap) -> CellState {
 
-    let mut evolved_cell: Cell;
+    let mut evolved_cell: CellState;
 
     evolved_cell = get_diffusion_in_cell(
                         parameters.d_a,
@@ -242,7 +327,7 @@ fn evolution_universe(
     dimensions: &Position, 
     universe: Universe,
     colored_map: &mut ColoredMap) -> Universe {
-    let mut evolved_universe: Universe = vec![vec![ Cell {a: 0.0, b: 0.0} ; dimensions.col]; dimensions.row];
+    let mut evolved_universe: Universe = vec![vec![ CellState {a: 0.0, b: 0.0} ; dimensions.col]; dimensions.row];
     
     for r in 0..dimensions.row {
         for c in 0..dimensions.col{
@@ -283,7 +368,7 @@ pub fn total_simulation(
 
 /// Color visualisation for cell
 /// Give a color for each cell according to the concentrations A and B
-pub fn color_cell(cell: &Cell) -> f32 {
+pub fn color_cell(cell: &CellState) -> f32 {
     if cell.a + cell.b <= 0. {
         return 0.;
     }
