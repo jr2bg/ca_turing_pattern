@@ -1,4 +1,7 @@
+use std::ops::{AddAssign, SubAssign, Mul};
+
 use bevy::prelude::*;
+use bevy::utils::HashMap;
 /// Work from https://biologicalmodeling.org/prologue/diffusion_automaton
 use rand::thread_rng;
 use rand::Rng;
@@ -37,6 +40,29 @@ impl CellState {
     }
 }
 
+impl AddAssign<CellState> for CellState {
+    fn add_assign(&mut self, rhs: CellState) {
+        self.a += rhs.a;
+        self.b += rhs.b;
+    }
+}
+
+impl SubAssign<CellState> for CellState {
+    fn sub_assign(&mut self, rhs: CellState) {
+        self.a -= rhs.a;
+        self.b -= rhs.b;
+    }
+}
+
+impl Mul<[f32; 2]> for CellState {
+    type Output = CellState;
+    fn mul(self, rhs: [f32;2]) -> Self::Output {
+        CellState {
+            a: self.a * rhs[0],
+            b: self.b * rhs[1],
+        }
+    }
+}
 /// States
 /// Stores the pair of current and previous state
 #[derive(Debug, Clone, Copy, Component)]
@@ -48,7 +74,7 @@ pub struct States {
 impl States {
     fn initialize(a: f32, b: f32) -> Self {
         States {
-            prev: CellState::default(),
+            prev: Default::default(),
             curr: CellState::new(a, b)
         }
     }
@@ -64,7 +90,7 @@ impl States {
 
 /// Position
 /// Pair of values indicating the row,col position of a cell
-#[derive(Component)]
+#[derive(Component, Clone, Copy)]
 pub struct Position {
     pub x: usize,
     pub y: usize,
@@ -111,6 +137,22 @@ impl Default for Parameters {
     }
 }
 
+/// Positions - Entity relationship
+/// Returns the entity given a Position if the position
+/// In this case, as the checking is done before getting
+/// the entity, there is no need to use Result or Option enums
+/// but stay as TODO
+pub struct PosEnt {
+    relation: HashMap<Position, Entity>,
+}
+
+/// How to run a system just once!!
+impl Default for PosEnt {
+    fn default() -> Self {
+        PosEnt { relation: Default::default() }
+    }
+}
+
 /// Universe to be considered
 /// Area where the simulation will be run
 pub type Universe = Vec<Vec<CellState>>;
@@ -120,13 +162,15 @@ pub type Universe = Vec<Vec<CellState>>;
 pub type ColoredMap = Vec<Vec<f32>>;
 
 /// Initialize universe
+/// 
 /// Create a universe with given dimensions and n cells with
 /// A and B components
+/// Each entity has a sprite, a position and previous and current statuses
 pub fn initialize_universe(
     mut commands: Commands,
     parameters: Res<Parameters>,
 ){
-    let prob_components:f64 = 0.005;
+    let prob_components:f64 = 0.05;
 
     let sprite_sz:f32 = 1.;
     let (n_x, n_y) = (parameters.n_x, parameters.n_y);
@@ -178,16 +222,28 @@ fn get_adjacent_cells_diffusion(
     d_a: f32,
     d_b: f32,
     angular_rate: f32,
-    diffused_cell: &mut CellState, 
-    neighbour_position: Position,
-    universe: &Universe
-    ){
+    interest_cell: &mut CellState,  // current
+    surrounding_cell: &CellState,   // previous
+    // neighbour_position: Position,
+    // universe: &Universe
+){
+    *interest_cell -= *interest_cell * [
+        angular_rate * d_a, 
+        angular_rate * d_b
+        ];
 
+    /*
     diffused_cell.a -= angular_rate * d_a * diffused_cell.a;
     diffused_cell.b -= angular_rate * d_b * diffused_cell.b;
 
     diffused_cell.a += angular_rate * d_a * universe[neighbour_position.y][neighbour_position.x ].a;
     diffused_cell.b += angular_rate * d_b * universe[neighbour_position.y][neighbour_position.x ].b;
+    */
+
+    *interest_cell += *surrounding_cell * [
+        angular_rate * d_a, 
+        angular_rate * d_b
+        ];
 }
 
 /// Diffusion for a cell 
@@ -201,18 +257,22 @@ fn get_diffusion_in_cell(
     d_b: f32,
     cell: &CellState, 
     position: &Position,
-    dimensions: &Position,
+    n_x: usize,
+    n_y: usize,
+    query: Query<(Entity, &Position, &States)>,
+    //dimensions: &Position,
     universe: &Universe) -> CellState {
 
     let mut diffused_cell = *cell;
 
-    if position.y as i32 - 1 >= 0 && position.x  as i32 - 1 >= 0 {
+    if position.y as i32 - 1 >= 0 && position.x as i32 - 1 >= 0 {
         get_adjacent_cells_diffusion(
             d_a,
             d_b,
             0.05,
             &mut diffused_cell,
-            Position {y: position.y - 1, x: position.x  - 1},
+            //Position {y: position.y - 1, x: position.x - 1},
+
             universe
             );
     }
